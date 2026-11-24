@@ -1,0 +1,273 @@
+"""HumanEval-style task definitions — 20 problems, hardcoded for offline use.
+
+Each task has:
+  - task_id: unique identifier
+  - prompt: problem description and signature
+  - entry_point: name of function to test
+  - canonical_solution: correct reference solution
+  - tests: 5+ assert statements
+"""
+from __future__ import annotations
+
+TASKS: list[dict] = [
+    {
+        "task_id": "add_two",
+        "prompt": "Write a function `add_two(a: int, b: int) -> int` that returns the sum of a and b.",
+        "entry_point": "add_two",
+        "canonical_solution": "def add_two(a: int, b: int) -> int:\n    return a + b\n",
+        "tests": [
+            "assert add_two(1, 2) == 3",
+            "assert add_two(0, 0) == 0",
+            "assert add_two(-1, 1) == 0",
+            "assert add_two(100, 200) == 300",
+            "assert add_two(-5, -3) == -8",
+        ],
+    },
+    {
+        "task_id": "factorial",
+        "prompt": "Write a function `factorial(n: int) -> int` that returns the factorial of n (n >= 0).",
+        "entry_point": "factorial",
+        "canonical_solution": "def factorial(n: int) -> int:\n    if n <= 1:\n        return 1\n    res = 1\n    for i in range(2, n + 1):\n        res *= i\n    return res\n",
+        "tests": [
+            "assert factorial(0) == 1",
+            "assert factorial(1) == 1",
+            "assert factorial(5) == 120",
+            "assert factorial(10) == 3628800",
+            "assert factorial(3) == 6",
+        ],
+    },
+    {
+        "task_id": "fibonacci",
+        "prompt": "Write a function `fibonacci(n: int) -> int` that returns the n-th Fibonacci number (0-indexed, fib(0)=0, fib(1)=1).",
+        "entry_point": "fibonacci",
+        "canonical_solution": "def fibonacci(n: int) -> int:\n    if n <= 0:\n        return 0\n    if n == 1:\n        return 1\n    a, b = 0, 1\n    for _ in range(2, n + 1):\n        a, b = b, a + b\n    return b\n",
+        "tests": [
+            "assert fibonacci(0) == 0",
+            "assert fibonacci(1) == 1",
+            "assert fibonacci(10) == 55",
+            "assert fibonacci(6) == 8",
+            "assert fibonacci(2) == 1",
+        ],
+    },
+    {
+        "task_id": "is_palindrome",
+        "prompt": 'Write a function `is_palindrome(s: str) -> bool` that returns True if s is a palindrome (case-insensitive, ignoring spaces).',
+        "entry_point": "is_palindrome",
+        "canonical_solution": 'def is_palindrome(s: str) -> bool:\n    cleaned = "".join(c.lower() for c in s if c.isalnum())\n    return cleaned == cleaned[::-1]\n',
+        "tests": [
+            'assert is_palindrome("racecar") == True',
+            'assert is_palindrome("hello") == False',
+            'assert is_palindrome("") == True',
+            'assert is_palindrome("A man a plan a canal Panama") == True',
+            'assert is_palindrome("ab") == False',
+        ],
+    },
+    {
+        "task_id": "reverse_string",
+        "prompt": "Write a function `reverse_string(s: str) -> str` that returns the reversed string.",
+        "entry_point": "reverse_string",
+        "canonical_solution": "def reverse_string(s: str) -> str:\n    return s[::-1]\n",
+        "tests": [
+            'assert reverse_string("hello") == "olleh"',
+            'assert reverse_string("") == ""',
+            'assert reverse_string("a") == "a"',
+            'assert reverse_string("ab") == "ba"',
+            'assert reverse_string("12345") == "54321"',
+        ],
+    },
+    {
+        "task_id": "max_element",
+        "prompt": "Write a function `max_element(lst: list[int]) -> int` that returns the maximum element in a non-empty list.",
+        "entry_point": "max_element",
+        "canonical_solution": "def max_element(lst: list[int]) -> int:\n    return max(lst)\n",
+        "tests": [
+            "assert max_element([1, 2, 3]) == 3",
+            "assert max_element([3, 2, 1]) == 3",
+            "assert max_element([-1, -2, -3]) == -1",
+            "assert max_element([42]) == 42",
+            "assert max_element([0, 0, 0]) == 0",
+        ],
+    },
+    {
+        "task_id": "count_vowels",
+        "prompt": 'Write a function `count_vowels(s: str) -> int` that returns the number of vowels (a, e, i, o, u) in s, case-insensitive.',
+        "entry_point": "count_vowels",
+        "canonical_solution": 'def count_vowels(s: str) -> int:\n    return sum(1 for c in s.lower() if c in "aeiou")\n',
+        "tests": [
+            'assert count_vowels("hello") == 2',
+            'assert count_vowels("AEIOU") == 5',
+            'assert count_vowels("xyz") == 0',
+            'assert count_vowels("") == 0',
+            'assert count_vowels("aEiOu") == 5',
+        ],
+    },
+    {
+        "task_id": "flatten_list",
+        "prompt": "Write a function `flatten_list(lst: list) -> list` that flattens a nested list of integers into a single list.",
+        "entry_point": "flatten_list",
+        "canonical_solution": "def flatten_list(lst: list) -> list:\n    res = []\n    for item in lst:\n        if isinstance(item, list):\n            res.extend(flatten_list(item))\n        else:\n            res.append(item)\n    return res\n",
+        "tests": [
+            "assert flatten_list([1, [2, 3], [4, [5]]]) == [1, 2, 3, 4, 5]",
+            "assert flatten_list([]) == []",
+            "assert flatten_list([1, 2, 3]) == [1, 2, 3]",
+            "assert flatten_list([[1], [2], [3]]) == [1, 2, 3]",
+            "assert flatten_list([[[1]], [[2]]]) == [1, 2]",
+        ],
+    },
+    {
+        "task_id": "gcd",
+        "prompt": "Write a function `gcd(a: int, b: int) -> int` that returns the greatest common divisor of two positive integers.",
+        "entry_point": "gcd",
+        "canonical_solution": "def gcd(a: int, b: int) -> int:\n    import math\n    return math.gcd(a, b)\n",
+        "tests": [
+            "assert gcd(12, 8) == 4",
+            "assert gcd(7, 13) == 1",
+            "assert gcd(100, 25) == 25",
+            "assert gcd(1, 1) == 1",
+            "assert gcd(48, 18) == 6",
+        ],
+    },
+    {
+        "task_id": "is_prime",
+        "prompt": "Write a function `is_prime(n: int) -> bool` that returns True if n is a prime number.",
+        "entry_point": "is_prime",
+        "canonical_solution": "def is_prime(n: int) -> bool:\n    if n <= 1:\n        return False\n    if n <= 3:\n        return True\n    if n % 2 == 0 or n % 3 == 0:\n        return False\n    i = 5\n    while i * i <= n:\n        if n % i == 0 or n % (i + 2) == 0:\n            return False\n        i += 6\n    return True\n",
+        "tests": [
+            "assert is_prime(2) == True",
+            "assert is_prime(1) == False",
+            "assert is_prime(17) == True",
+            "assert is_prime(4) == False",
+            "assert is_prime(97) == True",
+        ],
+    },
+    {
+        "task_id": "binary_search",
+        "prompt": "Write a function `binary_search(lst: list[int], target: int) -> int` that returns the index of target in a sorted list, or -1 if not found.",
+        "entry_point": "binary_search",
+        "canonical_solution": "def binary_search(lst: list[int], target: int) -> int:\n    lo, hi = 0, len(lst) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if lst[mid] == target:\n            return mid\n        elif lst[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1\n",
+        "tests": [
+            "assert binary_search([1, 2, 3, 4, 5], 3) == 2",
+            "assert binary_search([1, 2, 3, 4, 5], 6) == -1",
+            "assert binary_search([], 1) == -1",
+            "assert binary_search([1], 1) == 0",
+            "assert binary_search([1, 3, 5, 7], 5) == 2",
+        ],
+    },
+    {
+        "task_id": "merge_sorted",
+        "prompt": "Write a function `merge_sorted(a: list[int], b: list[int]) -> list[int]` that merges two sorted lists into one sorted list.",
+        "entry_point": "merge_sorted",
+        "canonical_solution": "def merge_sorted(a: list[int], b: list[int]) -> list[int]:\n    return sorted(a + b)\n",
+        "tests": [
+            "assert merge_sorted([1, 3, 5], [2, 4, 6]) == [1, 2, 3, 4, 5, 6]",
+            "assert merge_sorted([], [1, 2]) == [1, 2]",
+            "assert merge_sorted([1, 2], []) == [1, 2]",
+            "assert merge_sorted([], []) == []",
+            "assert merge_sorted([1], [1]) == [1, 1]",
+        ],
+    },
+    {
+        "task_id": "remove_duplicates",
+        "prompt": "Write a function `remove_duplicates(lst: list[int]) -> list[int]` that returns a new list with duplicates removed, preserving order.",
+        "entry_point": "remove_duplicates",
+        "canonical_solution": "def remove_duplicates(lst: list[int]) -> list[int]:\n    seen = set()\n    res = []\n    for x in lst:\n        if x not in seen:\n            seen.add(x)\n            res.append(x)\n    return res\n",
+        "tests": [
+            "assert remove_duplicates([1, 2, 2, 3]) == [1, 2, 3]",
+            "assert remove_duplicates([]) == []",
+            "assert remove_duplicates([1, 1, 1]) == [1]",
+            "assert remove_duplicates([3, 2, 1, 2, 3]) == [3, 2, 1]",
+            "assert remove_duplicates([1]) == [1]",
+        ],
+    },
+    {
+        "task_id": "matrix_transpose",
+        "prompt": "Write a function `matrix_transpose(m: list[list[int]]) -> list[list[int]]` that returns the transpose of a matrix.",
+        "entry_point": "matrix_transpose",
+        "canonical_solution": "def matrix_transpose(m: list[list[int]]) -> list[list[int]]:\n    if not m or not m[0]:\n        return []\n    return [[m[r][c] for r in range(len(m))] for c in range(len(m[0]))]\n",
+        "tests": [
+            "assert matrix_transpose([[1, 2], [3, 4]]) == [[1, 3], [2, 4]]",
+            "assert matrix_transpose([[1]]) == [[1]]",
+            "assert matrix_transpose([[1, 2, 3]]) == [[1], [2], [3]]",
+            "assert matrix_transpose([[1], [2], [3]]) == [[1, 2, 3]]",
+            "assert matrix_transpose([[1, 2], [3, 4], [5, 6]]) == [[1, 3, 5], [2, 4, 6]]",
+        ],
+    },
+    {
+        "task_id": "two_sum",
+        "prompt": "Write a function `two_sum(nums: list[int], target: int) -> list[int]` that returns the indices of two numbers that add up to target. Assume exactly one solution exists.",
+        "entry_point": "two_sum",
+        "canonical_solution": "def two_sum(nums: list[int], target: int) -> list[int]:\n    lookup = {}\n    for i, x in enumerate(nums):\n        comp = target - x\n        if comp in lookup:\n            return [lookup[comp], i]\n        lookup[x] = i\n    return []\n",
+        "tests": [
+            "assert sorted(two_sum([2, 7, 11, 15], 9)) == [0, 1]",
+            "assert sorted(two_sum([3, 2, 4], 6)) == [1, 2]",
+            "assert sorted(two_sum([3, 3], 6)) == [0, 1]",
+            "assert sorted(two_sum([1, 5, 3, 7], 8)) == [1, 2]",
+            "assert sorted(two_sum([0, 4, 3, 0], 0)) == [0, 3]",
+        ],
+    },
+    {
+        "task_id": "longest_common_prefix",
+        "prompt": 'Write a function `longest_common_prefix(strs: list[str]) -> str` that returns the longest common prefix among a list of strings.',
+        "entry_point": "longest_common_prefix",
+        "canonical_solution": 'def longest_common_prefix(strs: list[str]) -> str:\n    if not strs:\n        return ""\n    prefix = strs[0]\n    for s in strs[1:]:\n        while not s.startswith(prefix):\n            prefix = prefix[:-1]\n            if not prefix:\n                return ""\n    return prefix\n',
+        "tests": [
+            'assert longest_common_prefix(["flower", "flow", "flight"]) == "fl"',
+            'assert longest_common_prefix(["dog", "racecar", "car"]) == ""',
+            'assert longest_common_prefix(["a"]) == "a"',
+            'assert longest_common_prefix(["", "b"]) == ""',
+            'assert longest_common_prefix(["abc", "abc"]) == "abc"',
+        ],
+    },
+    {
+        "task_id": "roman_to_int",
+        "prompt": "Write a function `roman_to_int(s: str) -> int` that converts a Roman numeral string to an integer. Valid input: I, V, X, L, C, D, M.",
+        "entry_point": "roman_to_int",
+        "canonical_solution": 'def roman_to_int(s: str) -> int:\n    values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}\n    total = 0\n    for i in range(len(s)):\n        curr = values[s[i]]\n        if i + 1 < len(s) and curr < values[s[i + 1]]:\n            total -= curr\n        else:\n            total += curr\n    return total\n',
+        "tests": [
+            'assert roman_to_int("III") == 3',
+            'assert roman_to_int("IV") == 4',
+            'assert roman_to_int("IX") == 9',
+            'assert roman_to_int("LVIII") == 58',
+            'assert roman_to_int("MCMXCIV") == 1994',
+        ],
+    },
+    {
+        "task_id": "valid_parentheses",
+        "prompt": 'Write a function `valid_parentheses(s: str) -> bool` that returns True if the string of brackets ()[]{} is valid.',
+        "entry_point": "valid_parentheses",
+        "canonical_solution": 'def valid_parentheses(s: str) -> bool:\n    mapping = {")": "(", "}": "{", "]": "["}\n    stack = []\n    for char in s:\n        if char in mapping.values():\n            stack.append(char)\n        elif char in mapping:\n            if not stack or stack.pop() != mapping[char]:\n                return False\n    return len(stack) == 0\n',
+        "tests": [
+            'assert valid_parentheses("()") == True',
+            'assert valid_parentheses("()[]{}") == True',
+            'assert valid_parentheses("(]") == False',
+            'assert valid_parentheses("([)]") == False',
+            'assert valid_parentheses("{[]}") == True',
+        ],
+    },
+    {
+        "task_id": "power_set",
+        "prompt": "Write a function `power_set(s: list[int]) -> list[list[int]]` that returns all subsets of s. Order of subsets and elements within subsets does not matter.",
+        "entry_point": "power_set",
+        "canonical_solution": "def power_set(s: list[int]) -> list[list[int]]:\n    res = [[]]\n    for elem in s:\n        res += [curr + [elem] for curr in res]\n    return res\n",
+        "tests": [
+            "assert len(power_set([])) == 1",
+            "assert len(power_set([1])) == 2",
+            "assert len(power_set([1, 2])) == 4",
+            "assert len(power_set([1, 2, 3])) == 8",
+            "assert sorted([sorted(x) for x in power_set([1, 2])]) == [[], [1], [1, 2], [2]]",
+        ],
+    },
+    {
+        "task_id": "spiral_matrix",
+        "prompt": "Write a function `spiral_order(matrix: list[list[int]]) -> list[int]` that returns elements of the matrix in spiral order.",
+        "entry_point": "spiral_order",
+        "canonical_solution": "def spiral_order(matrix: list[list[int]]) -> list[int]:\n    if not matrix or not matrix[0]:\n        return []\n    res = []\n    top, bottom = 0, len(matrix) - 1\n    left, right = 0, len(matrix[0]) - 1\n    while top <= bottom and left <= right:\n        for c in range(left, right + 1):\n            res.append(matrix[top][c])\n        top += 1\n        for r in range(top, bottom + 1):\n            res.append(matrix[r][right])\n        right -= 1\n        if top <= bottom:\n            for c in range(right, left - 1, -1):\n                res.append(matrix[bottom][c])\n            bottom -= 1\n        if left <= right:\n            for r in range(bottom, top - 1, -1):\n                res.append(matrix[r][left])\n            left += 1\n    return res\n",
+        "tests": [
+            "assert spiral_order([[1, 2, 3], [4, 5, 6], [7, 8, 9]]) == [1, 2, 3, 6, 9, 8, 7, 4, 5]",
+            "assert spiral_order([[1]]) == [1]",
+            "assert spiral_order([[1, 2], [3, 4]]) == [1, 2, 4, 3]",
+            "assert spiral_order([[1, 2, 3, 4]]) == [1, 2, 3, 4]",
+            "assert spiral_order([[1], [2], [3]]) == [1, 2, 3]",
+        ],
+    },
+]
