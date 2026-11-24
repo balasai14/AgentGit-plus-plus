@@ -6,16 +6,32 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
+import math
 import os
+import site
 import sys
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from scipy import stats
+# Add user site packages if present
+for p in [
+    site.getusersitepackages(),
+    r"C:\Users\Sai\AppData\Roaming\Python\Python315\site-packages",
+    r"C:\Users\Sai\AppData\Local\Python\pythoncore-3.15-64\Lib\site-packages",
+]:
+    if p and os.path.exists(p) and p not in sys.path:
+        sys.path.append(p)
+
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+    HAS_DEPS = True
+except ImportError:
+    HAS_DEPS = False
 
 
 def fig1_score_vs_budget(df: pd.DataFrame, outdir: str) -> None:
@@ -119,7 +135,7 @@ def fig2_regret(df: pd.DataFrame, outdir: str) -> None:
 
     ax.set_title("Figure 2: Regret vs. Oracle Across Token Budgets", fontsize=13, fontweight="bold", pad=12)
     ax.set_xlabel("Token Budget (% of Exhaustive Unshared Cost)", fontsize=11)
-    ax.set_ylabel("Regret (Oracle Score − Best Score)", fontsize=11)
+    ax.set_ylabel("Regret (Oracle Score - Best Score)", fontsize=11)
     ax.set_xticks([25, 50, 75, 100])
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.legend(title="Policy", fontsize=9, title_fontsize=10, loc="upper right", framealpha=0.9)
@@ -168,9 +184,28 @@ def export_tables(df: pd.DataFrame, outdir: str) -> pd.DataFrame:
         f.write(md_content)
     print(f"Generated: {md_path}")
 
-    # Export LaTeX
+    # Export LaTeX (self-contained, no jinja2 dependency required)
     tex_path = os.path.join(outdir, "table.tex")
-    formatted.to_latex(tex_path, index=False)
+    cols = list(formatted.columns)
+    tex_lines = [
+        "\\begin{table}[htbp]",
+        "\\centering",
+        "\\caption{Exploration Policy Benchmark: Tokens, Quality, and Oracle Hit Rate}",
+        "\\label{tab:policy_comparison}",
+        "\\begin{tabular}{lrrrrr}",
+        "\\toprule",
+        " & ".join(cols) + " \\\\",
+        "\\midrule",
+    ]
+    for _, row in formatted.iterrows():
+        tex_lines.append(" & ".join(str(row[c]).replace("%", "\\%") for c in cols) + " \\\\")
+    tex_lines.extend([
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
+    ])
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(tex_lines) + "\n")
     print(f"Generated: {tex_path}")
 
     return summary

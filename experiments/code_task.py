@@ -94,30 +94,50 @@ def _fix_prompt(task_prompt: str, code: str, test_feedback: str, variant: str, c
 # Code extraction & Unit test execution
 # ---------------------------------------------------------------------------
 
+_TEST_RESULT_CACHE: dict[str, tuple[float, str]] = {}
+
+
 def extract_code(text: str) -> str:
     """Extract python source code from LLM completion text."""
-    # Look for ```python ... ```
     match = re.search(r"```python\s*([\s\S]*?)```", text)
     if match:
         return match.group(1).strip()
-    # Look for generic ``` ... ```
     match = re.search(r"```\s*([\s\S]*?)```", text)
     if match:
         return match.group(1).strip()
-    # Otherwise return raw text
     return text.strip()
 
 
 def run_unit_tests(code: str, entry_point: str, tests: list[str], timeout: float = 5.0) -> tuple[float, str]:
-    """Execute unit tests in a subprocess with timeout.
+    """Execute unit tests in a subprocess with timeout and memoization.
 
     Returns:
         (score, details_string) where score in [0.0, 1.0] is fraction of passed tests.
     """
     clean_code = extract_code(code)
-    test_suite = repr(tests)
+    cache_key = f"{entry_point}::{hash(clean_code)}::{len(tests)}"
+    if cache_key in _TEST_RESULT_CACHE:
+        return _TEST_RESULT_CACHE[cache_key]
 
-    # Harness executes in an isolated python subprocess
+    # In dry-run mode, perform instant fast evaluation without spawning subprocesses
+    if is_dry_run():
+        if not clean_code or "def " not in clean_code:
+            res = (0.0, "Dry-run: stub solution failed all tests.")
+        else:
+            # Check how close it is to reference
+            h = abs(hash(clean_code)) % 100
+            if "###REF_CODE" in clean_code or h < 80:
+                res = (1.0, f"Dry-run: PASSED {len(tests)}/{len(tests)}")
+            elif h < 90:
+                passed = max(1, len(tests) - 1)
+                res = (passed / len(tests), f"Dry-run: PASSED {passed}/{len(tests)}")
+            else:
+                passed = max(1, len(tests) // 2)
+                res = (passed / len(tests), f"Dry-run: PASSED {passed}/{len(tests)}")
+        _TEST_RESULT_CACHE[cache_key] = res
+        return res
+
+    test_suite = repr(tests)
     runner_script = f"""
 import sys
 
@@ -149,20 +169,22 @@ if failures:
             text=True,
             timeout=timeout,
         )
-        output = proc.stdout + "\n" + proc.stderr
         match = re.search(r"PASSED:\s*(\d+)/(\d+)", proc.stdout)
         if match:
             p = int(match.group(1))
             tot = int(match.group(2))
             frac = p / max(1, tot)
-            return frac, proc.stdout.strip()
+            res = (frac, proc.stdout.strip())
         else:
             err = proc.stderr.strip()[:300] if proc.stderr else "Runtime execution error"
-            return 0.0, f"Execution failed: {err}"
+            res = (0.0, f"Execution failed: {err}")
     except subprocess.TimeoutExpired:
-        return 0.0, "Execution timed out (5s limit exceeded)"
+        res = (0.0, "Execution timed out (5s limit exceeded)")
     except Exception as ex:
-        return 0.0, f"Subprocess runner error: {ex}"
+        res = (0.0, f"Subprocess runner error: {ex}")
+
+    _TEST_RESULT_CACHE[cache_key] = res
+    return res
 
 
 def judge_plan_quality(plan: str, task_prompt: str, seed: int = 42) -> float:

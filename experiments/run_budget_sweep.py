@@ -53,7 +53,7 @@ def run_sweep(num_problems: int = 20, seeds: list[int] | None = None) -> list[di
     all_results: list[dict] = []
 
     total_configs = len(seeds) * len(tasks) * len(POLICIES) * len(BUDGET_FRACTIONS)
-    print(f"\nStarting budget sweep: {len(tasks)} problems × {len(seeds)} seeds × {len(POLICIES)} policies × {len(BUDGET_FRACTIONS)} budgets")
+    print(f"\nStarting budget sweep: {len(tasks)} problems * {len(seeds)} seeds * {len(POLICIES)} policies * {len(BUDGET_FRACTIONS)} budgets")
     print(f"Total experiment evaluations: {total_configs}\n")
 
     for seed_idx, seed in enumerate(seeds):

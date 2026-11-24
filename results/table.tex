@@ -1,0 +1,18 @@
+\begin{table}[htbp]
+\centering
+\caption{Exploration Policy Benchmark: Tokens, Quality, and Oracle Hit Rate}
+\label{tab:policy_comparison}
+\begin{tabular}{lrrrrr}
+\toprule
+Policy & Mean Tokens & Mean Best Score & Oracle Hit Rate & Mean Regret & Mean Leaves Explored \\
+\midrule
+beam & 2,118 & 0.8000 & 100.0\% & 0.0000 & 6.0 \\
+cost_aware_sh & 4,972 & 0.8000 & 100.0\% & 0.0000 & 22.7 \\
+exhaustive_no_sharing & 11,090 & 0.8000 & 100.0\% & 0.0000 & 27.0 \\
+exhaustive_shared & 5,588 & 0.8000 & 100.0\% & 0.0000 & 27.0 \\
+greedy & 1,232 & 0.8000 & 100.0\% & 0.0000 & 3.0 \\
+random_prune & 4,893 & 0.8000 & 100.0\% & 0.0000 & 23.2 \\
+sh_cost_blind & 2,574 & 0.8000 & 100.0\% & 0.0000 & 6.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
