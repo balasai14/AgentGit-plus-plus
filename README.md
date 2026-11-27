@@ -81,6 +81,11 @@ If even $k_i = 1$ exceeds the budget because a single path alone ($c_0 + c_1 + c
 
 ## System Architecture
 
+<div align="center">
+  <img src="assets/architecture.png" alt="AgentGit++ Architecture: CASH Scheduler and Multi-Stage Checkpoint Exploration" width="560px" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
+  <p><em>Figure 1: AgentGit++ system workflow showing the Cost-Aware Successive Halving (CASH) scheduler orchestrating Planning, Coding, and Fixing stages with prefix sharing and LLM call caching.</em></p>
+</div>
+
 ```
 agentgit/
 ├── llm_cache.py          # Transparent SQLite LLM caching + cost accounting

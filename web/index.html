@@ -231,6 +231,23 @@
           </p>
         </div>
       </div>
+
+      <!-- Architecture Diagram Card -->
+      <div class="glass-card rounded-xl p-6 border border-zinc-800 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-semibold text-white flex items-center gap-2">
+              <i data-lucide="workflow" class="w-4 h-4 text-rose-500"></i>
+              CASH Scheduler & Multi-Stage Checkpoint Architecture
+            </h2>
+            <p class="text-xs text-zinc-400">Planning (top-k1) &rarr; Coding (top-k2) &rarr; Fixing with LangGraph executor and LLM-call caching</p>
+          </div>
+          <span class="badge bg-zinc-800 text-zinc-300 font-mono text-xs">System Workflow</span>
+        </div>
+        <div class="flex justify-center p-4 bg-zinc-900/50 rounded-lg border border-zinc-800/80">
+          <img src="architecture.png" alt="AgentGit++ Architecture Diagram" class="max-h-[520px] rounded-lg shadow-xl border border-zinc-700/40 object-contain" />
+        </div>
+      </div>
     </div>
 
     <!-- ============================================================ -->
