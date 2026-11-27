@@ -1,74 +1,89 @@
 # AgentGit++: Budget-Aware Exploration over Checkpoint Trees
 
-This document outlines the theoretical background, experimental protocol, and instructions to reproduce all figures and tables.
-
-## 1. Research Claim
+Empirical evaluation and reproduction guide for the research claim:
 
 > In a multi-stage LLM workflow with checkpoint prefix sharing, a cost-aware successive-halving scheduler reaches near-oracle best-branch quality at a fraction of the token cost of exhaustive exploration.
 
-## 2. Theoretical Framework
+---
 
-For a workflow of $S$ stages (e.g. Plan $\to$ Code $\to$ Fix) with branching factor $x$ and average per-stage token costs $c_i$:
+## 1. Experimental Methodology
 
-1. **Exhaustive Exploration without Prefix Sharing ($C_{\text{std}}$)**:
-   $$C_{\text{std}} = \left(\sum_{i=1}^S c_i\right) \cdot \prod_{i=1}^S x_i$$
-2. **Exhaustive Exploration with Prefix Sharing ($C_{\text{shared}}$)**:
-   $$C_{\text{shared}} = \sum_{i=1}^S \left(c_i \cdot \prod_{j \le i} x_j\right)$$
-3. **Pruned / Successive Halving Exploration ($C_{\text{pruned}}$)**:
-   $$C_{\text{pruned}} = \sum_{i=1}^S c_i \cdot x_i \cdot N_{i-1}, \quad N_0 = 1, \quad N_i = \min(N_{i-1} \cdot x_i, k_i)$$
+### Benchmark Tasks (40+ Harder Problems)
+The benchmark suite in `experiments/tasks.py` contains **45 harder coding tasks** drawn from HumanEval+, MBPP-hard, and LiveCodeBench-lite subsets.
+- Each problem has rigorous unit test suites (5–8 assertions, including negative values, empty arrays, single elements, and stress corner cases).
+- **Pilot Pass-Rate Filter**: Only problems whose 3-sample pilot pass rate falls strictly between **20% and 80%** are retained. This guarantees tasks are neither trivial (100% pass across all leaves) nor intractable (0% pass), creating clear discrimination between search policies.
 
-Our proposed **Cost-Aware Successive Halving (`cost_aware_sh`)** dynamically solves for the maximum survivor count $k_i$ at each stage such that:
-$$\text{Cost}_{\text{used}} + \sum_{j > i} c_j \cdot x \cdot \text{survivors}_j \le B$$
+### Multi-Stage Workflow & Temperature Scaling
+Each problem expands a 3-stage tree (**Plan &rarr; Code &rarr; Fix**) with 3 variants per stage, generating $3^3 = 27$ distinct leaves:
+- **Variant 0**: `concise` prompt style, **Temperature = 0.2** (deterministic, conservative)
+- **Variant 1**: `step_by_step` prompt style, **Temperature = 0.7** (balanced)
+- **Variant 2**: `test_driven` prompt style, **Temperature = 1.0** (creative, high variance)
 
-## 3. Quickstart & Dry-Run (< 1 minute)
+The cache key incorporates `(model, temperature, messages, seed)`, ensuring that distinct seeds produce genuinely different sampling paths.
 
-The repository provides a deterministic mock mode that validates the entire pipeline without spending API tokens:
+### Budget Regime (10% to 100% of Shared Cost)
+Budgets are defined as **10%, 20%, 30%, 50%, and 100%** of the `exhaustive_shared` tree cost:
+- **Exhaustive policies**: Run leaves in fixed order until the budget is depleted, returning the best leaf found so far.
+- **CASH (Cost-Aware Successive Halving)**: Dynamically sizes survivor quotas $k_i$ based on measured per-stage costs $c_i$ and projected future expenditure:
+  $$\text{remaining\_cost} = \sum_{j > i} c_j \cdot x_j \cdot \text{survivors}_j$$
+  CASH **never** exceeds the allocated budget unless one individual path alone does not fit, in which case it logs the warning.
+- **Baselines**: `greedy`, `beam`, `sh_cost_blind`, `random_prune` also strictly adhere to the token cap.
+
+---
+
+## 2. Quickstart & Dry-Run (Fast Verification)
+
+Run the full sweep and generate all figures and tables:
 
 ```bash
-# 1. Run the budget sweep across all 20 problems, 3 seeds, and 4 budget fractions
+# 1. Run the budget sweep across all 40+ problems and 3 seeds
 python experiments/run_budget_sweep.py --dry-run
 
-# 2. Analyze results and generate figures + markdown/LaTeX tables
+# 2. Generate publication figures and Markdown/LaTeX tables
 python experiments/analyze.py
 
-# 3. Validate empirical token costs against theoretical formulas
+# 3. Validate theoretical cost models
 python experiments/theory_check.py --dry-run
 ```
 
-All figures and tables will be generated under `results/`:
-- `results/fig1_score_vs_budget.png`: Figure 1 (Best Score vs Token Budget with 95% CI bands)
-- `results/fig2_regret.png`: Figure 2 (Regret vs Oracle across policies)
-- `results/table.md`: Summary table in GitHub Markdown
-- `results/table.tex`: Summary table in LaTeX format
-- `results/results.csv`: Complete raw evaluation logs
+---
 
-## 4. Live API Experiment (gpt-4o-mini)
-
-To run the live experiment against OpenAI:
+## 3. Live API Experiment (OpenAI gpt-4o-mini)
 
 ```bash
-# 1. Configure your OpenAI API key in .env
-echo "OPENAI_API_KEY=your-api-key-here" > .env
+# Configure your API key
+echo "OPENAI_API_KEY=your-api-key" > .env
 
-# 2. Run the budget sweep (estimates spend and asks for confirmation first)
-python experiments/run_budget_sweep.py --problems 20 --seeds 3
+# Run sweep across 40 tasks and 3 seeds
+python experiments/run_budget_sweep.py --problems 40 --seeds 3
 
-# 3. Generate figures and tables
+# Generate analysis artifacts
 python experiments/analyze.py
 
-# 4. Verify theory equations
+# Check theoretical validation
 python experiments/theory_check.py
 ```
 
-## 5. Exploration Policies Evaluated
+---
 
-| Policy | Prefix Sharing | Dynamic Budgeting | Description |
-|---|---|---|---|
-| `exhaustive_no_sharing` | No | No | Recomputes all 27 paths from scratch (cost upper bound). |
-| `exhaustive_shared` | Yes | No | Full tree with prefix caching (AgentGit baseline). |
-| `cost_aware_sh` (Ours) | Yes | Yes | Successive halving with survivor count tuned to remaining budget. |
-| `sh_cost_blind` | Yes | No | Fixed successive halving ablation ($k_i = 3, 2, 1$). |
-| `beam` | Yes | No | Beam search keeping top-2 candidates at each stage. |
-| `greedy` | Yes | No | Greedy search keeping single top-1 candidate at each stage. |
-| `random_prune` | Yes | Yes | Baseline randomly pruning to budget-constrained survivors. |
+## 4. Generated Artifacts
 
+All outputs are saved to `results/`:
+- `results/results.csv`: Summary metrics per task &times; seed &times; policy &times; budget.
+- `results/leaves.csv`: Leaf-level log recording all 27 paths per problem with per-stage token costs ($c_0, c_1, c_2$), leaf score, and oracle status.
+- `results/stage_costs.csv`: Empirical per-stage costs used for theoretical verification.
+- `results/fig1_score_vs_budget.png`: Figure 1 (Best Quality vs. Budget Fraction with 95% CI bands).
+- `results/fig2_regret.png`: Figure 2 (Regret vs. Oracle).
+- `results/table.md`: Markdown summary table.
+- `results/table.tex`: Publication-ready LaTeX table.
+
+---
+
+## 5. Web Dashboard
+
+Launch the interactive dashboard to inspect the checkpoint trees and policy simulations:
+
+```bash
+python web/serve.py
+```
+Or open [web/index.html](file:///c:/Users/Sai/Desktop/College/agentgit/web/index.html) in any browser.

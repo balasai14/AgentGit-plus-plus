@@ -1,8 +1,11 @@
 """LLM call cache with SQLite backend and token-cost tracking.
 
-Every LLM call goes through ``cached_llm_call()``.  On first call the
+Every LLM call goes through ``cached_llm_call()``. On first call the
 response is stored; on replay the stored response is returned with
 ``charged=False`` so cost accounting stays correct while no money is spent.
+
+The cache key incorporates model, temperature, messages, AND seed so that
+different seeds produce distinct samples.
 """
 from __future__ import annotations
 
@@ -29,9 +32,11 @@ class LLMResponse:
     completion_tokens: int
     total_tokens: int
     latency_s: float
-    charged: bool  # True = actually hit the API; False = cache replay
+    charged: bool  # True = hit API; False = cache replay
     model: str = ""
     cache_key: str = ""
+    seed: int | None = None
+    temperature: float = 0.7
 
 
 @dataclass
@@ -59,12 +64,18 @@ class CostAccumulator:
 _DEFAULT_DB = "cache.db"
 
 
-def _cache_key(model: str, temperature: float, messages: list[dict]) -> str:
+def _cache_key(model: str, temperature: float, messages: list[dict], seed: int | None = None) -> str:
+    """Generate SHA256 key including model, temperature, messages, and seed."""
     blob = json.dumps(
-        {"model": model, "temperature": temperature, "messages": messages},
+        {
+            "model": model,
+            "temperature": round(temperature, 4),
+            "messages": messages,
+            "seed": seed,
+        },
         sort_keys=True,
     )
-    return hashlib.sha256(blob.encode()).hexdigest()
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _ensure_table(conn: sqlite3.Connection) -> None:
@@ -73,6 +84,7 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
             cache_key           TEXT PRIMARY KEY,
             model               TEXT,
             temperature         REAL,
+            seed                INTEGER,
             messages            TEXT,
             response            TEXT,
             prompt_tokens       INTEGER,
@@ -97,73 +109,114 @@ def get_connection(db_path: str = _DEFAULT_DB) -> sqlite3.Connection:
 
 
 # ---------------------------------------------------------------------------
-# Fake / dry-run LLM
+# Deterministic mock LLM for dry-run
 # ---------------------------------------------------------------------------
 
 _FAKE_COUNTER = 0
 
 
-def _fake_llm_call(model: str, messages: list[dict], seed: int | None = None, **kw) -> LLMResponse:
-    """Deterministic fake for --dry-run testing.
+def _fake_llm_call(
+    model: str,
+    messages: list[dict],
+    temperature: float = 0.7,
+    seed: int | None = None,
+) -> LLMResponse:
+    """Deterministic fake LLM for --dry-run testing.
 
-    Produces realistic responses for plan, judge, code, and fix stages.
+    Varies behavior across prompt style, temperature (0.2, 0.7, 1.0), and seed.
+    Higher temperatures produce more stochastic variation and potential bugs,
+    allowing different leaves to achieve varied pass rates (20% - 80%).
     """
     global _FAKE_COUNTER
     _FAKE_COUNTER += 1
-    seed_str = _cache_key(model, kw.get("temperature", 0.0), messages)
-    hash_int = int(seed_str[:8], 16) + (seed or 0)
+    key = _cache_key(model, temperature, messages, seed=seed)
+    h_int = int(key[:8], 16) + (seed or 0) * 101
 
     last_msg = messages[-1]["content"] if messages else ""
     lower = last_msg.lower()
 
-    # Check for embedded dry-run reference code in message
+    # Extract reference code if present
     ref_match = re.search(r"###REF_CODE:\s*([\s\S]*?)###END_REF###", last_msg)
     ref_code = ref_match.group(1).strip() if ref_match else ""
 
+    # Parse task entry point from prompt if available
+    ep_match = re.search(r"`([a-zA-Z_][a-zA-Z0-9_]*)\(", last_msg)
+    entry_point = ep_match.group(1) if ep_match else "solution"
+
     if "judge" in lower or "rate" in lower or "score" in lower:
-        # LLM-as-judge — deterministic score 4..10
-        score = 4 + (hash_int % 7)
+        # LLM-as-judge for plans: rating 3 to 9
+        score = 4 + (h_int % 6)
         content = str(score)
         ptok = max(30, len(last_msg.split()))
         ctok = 3
+
     elif "plan" in lower or "brief plan" in lower:
         # Plan stage
-        content = (
-            "1. Validate input types and boundary conditions.\n"
-            "2. Initialize auxiliary data structures.\n"
-            "3. Execute primary transformation loop.\n"
-            "4. Return finalized result satisfying assert specs."
-        )
+        if temperature <= 0.3:
+            content = (
+                f"1. Concise analysis of {entry_point} boundary inputs.\n"
+                "2. Direct deterministic algorithmic approach.\n"
+                "3. Return final result without side-effects."
+            )
+        elif temperature <= 0.8:
+            content = (
+                f"1. Decompose {entry_point} into pre-processing, core loop, and post-conditions.\n"
+                "2. Explicit invariant checks and memory management.\n"
+                "3. Handle zero-length and edge-value assertions."
+            )
+        else:  # High temperature (1.0)
+            content = (
+                f"1. Test-driven decomposition for {entry_point}.\n"
+                "2. Adversarial exploration of edge cases, non-standard types, and performance bounds.\n"
+                "3. Refactored single-pass implementation."
+            )
         ptok = max(40, len(last_msg.split()))
-        ctok = 45
-    elif "fix" in lower or "fixing" in lower:
-        # Fix stage — takes previous code and improves it
+        ctok = max(25, len(content.split()))
+
+    elif "fix" in lower or "correct" in lower or "diagnose" in lower:
+        # Fix stage: takes code and test feedback, attempts to fix
+        ptok = max(70, len(last_msg.split()))
+        # Quality varies with temperature and seed
+        # temp 0.2: high fix fidelity if bug was simple
+        # temp 0.7: standard fix
+        # temp 1.0: can introduce regression or completely fix
+        rand_val = (h_int % 100)
         if ref_code:
-            # 85% chance to output perfect code, otherwise slightly flawed
-            if hash_int % 100 < 85:
-                content = ref_code
+            if temperature <= 0.3:
+                # 70% fix rate
+                content = ref_code if rand_val < 70 else _inject_subtle_bug(ref_code, h_int)
+            elif temperature <= 0.8:
+                # 60% fix rate
+                content = ref_code if rand_val < 60 else _inject_subtle_bug(ref_code, h_int)
             else:
-                content = ref_code.replace("==", "!=") if "==" in ref_code else ref_code
+                # 50% fix rate, higher variance
+                content = ref_code if rand_val < 50 else _inject_subtle_bug(ref_code, h_int)
         else:
-            content = "def solution(*args, **kwargs):\n    return None\n"
-        ptok = max(80, len(last_msg.split()))
+            content = f"def {entry_point}(*args, **kwargs):\n    return None\n"
         ctok = max(30, len(content.split()))
+
     else:
         # Code generation stage
+        ptok = max(50, len(last_msg.split()))
+        rand_val = (h_int % 100)
         if ref_code:
-            # Variant 0 -> 40% chance perfect, Variant 1 -> 70% chance perfect, Variant 2 -> 90% perfect
-            mod = hash_int % 10
-            if mod >= 3:
-                content = ref_code
+            # Vary quality:
+            # temp 0.2: conservative, 45% perfect, 55% partial
+            # temp 0.7: balanced, 55% perfect, 45% partial
+            # temp 1.0: high variance, 40% perfect, 60% partial
+            if temperature <= 0.3:
+                content = ref_code if rand_val < 45 else _inject_subtle_bug(ref_code, h_int)
+            elif temperature <= 0.8:
+                content = ref_code if rand_val < 55 else _inject_subtle_bug(ref_code, h_int)
             else:
-                # Buggy version that passes only some tests
-                content = ref_code.replace("range(2,", "range(3,") if "range(2," in ref_code else (
-                    ref_code.replace("a + b", "a + b if a > 0 else 0") if "a + b" in ref_code else ref_code
-                )
+                content = ref_code if rand_val < 40 else _inject_subtle_bug(ref_code, h_int)
         else:
-            content = "def solution(*args, **kwargs):\n    return None\n"
-        ptok = max(60, len(last_msg.split()))
+            content = f"def {entry_point}(*args, **kwargs):\n    return None\n"
         ctok = max(30, len(content.split()))
+
+    # Wrap code in markdown blocks if it's code
+    if "def " in content and "```" not in content:
+        content = f"```python\n{content}\n```"
 
     total = ptok + ctok
     return LLMResponse(
@@ -174,8 +227,23 @@ def _fake_llm_call(model: str, messages: list[dict], seed: int | None = None, **
         latency_s=0.005,
         charged=False,
         model=model,
-        cache_key=seed_str,
+        cache_key=key,
+        seed=seed,
+        temperature=temperature,
     )
+
+
+def _inject_subtle_bug(code: str, salt: int) -> str:
+    """Inject a realistic subtle edge-case bug without affecting loop bounds or causing infinite loops."""
+    mod = salt % 3
+    if mod == 0 and "return " in code:
+        # Off-by-one or edge case in return
+        return code.replace("return ", "return -1 if False else ", 1)
+    elif mod == 1 and " + 1" in code:
+        return code.replace(" + 1", " + 0", 1)
+    elif mod == 2 and " - 1" in code:
+        return code.replace(" - 1", " - 0", 1)
+    return code + "\n# edge case variant\n"
 
 
 # ---------------------------------------------------------------------------
@@ -211,12 +279,13 @@ def cached_llm_call(
     On cache hit the stored response is returned with ``charged=False``.
     Token counts are always reported so cost accounting stays correct
     even on replay.
+    The cache key includes ``seed`` so different seeds produce distinct cache hits.
     """
-    key = _cache_key(model, temperature, messages)
+    key = _cache_key(model, temperature, messages, seed=seed)
 
     # --- dry-run shortcut ---
     if _DRY_RUN:
-        return _fake_llm_call(model, messages, seed=seed, temperature=temperature)
+        return _fake_llm_call(model, messages, temperature=temperature, seed=seed)
 
     # --- check cache ---
     conn = get_connection(db_path)
@@ -236,6 +305,8 @@ def cached_llm_call(
             charged=False,
             model=model,
             cache_key=key,
+            seed=seed,
+            temperature=temperature,
         )
 
     # --- live API call ---
@@ -273,16 +344,18 @@ def cached_llm_call(
         charged=True,
         model=model,
         cache_key=key,
+        seed=seed,
+        temperature=temperature,
     )
 
     # store in cache
     conn.execute(
         "INSERT OR REPLACE INTO llm_cache "
-        "(cache_key, model, temperature, messages, response, "
+        "(cache_key, model, temperature, seed, messages, response, "
         " prompt_tokens, completion_tokens, total_tokens, latency_s, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            key, model, temperature, json.dumps(messages), choice,
+            key, model, temperature, seed, json.dumps(messages), choice,
             resp.prompt_tokens, resp.completion_tokens, resp.total_tokens,
             latency, time.time(),
         ),

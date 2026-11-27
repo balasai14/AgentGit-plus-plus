@@ -1,17 +1,18 @@
 """3-stage code-generation workflow: Plan -> Code -> Fix.
 
-Each stage has 3 prompt variants (concise / step-by-step / test-driven),
-giving 3^3 = 27 total leaf paths per problem.
+Each stage has 3 variants differing in BOTH prompt style and temperature:
+  - Variant 0: 'concise', temperature = 0.2 (conservative, low variance)
+  - Variant 1: 'step_by_step', temperature = 0.7 (balanced)
+  - Variant 2: 'test_driven', temperature = 1.0 (creative, high variance)
 
-This module implements the ``ExplorationTask`` protocol for ``agentgit.policies``.
+This produces 3^3 = 27 diverse leaves with varying quality.
+Implements the ``ExplorationTask`` protocol for ``agentgit.policies``.
 """
 from __future__ import annotations
 
 import re
 import subprocess
 import sys
-import tempfile
-import textwrap
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -25,10 +26,10 @@ from agentgit.checkpoint_store import Checkpoint, CheckpointTree
 
 GEN_MODEL = "gpt-4o-mini"
 JUDGE_MODEL = "gpt-4o-mini"
-TEMPERATURE = 0.7
 VARIANTS = 3
 STAGES = ["plan", "code", "fix"]
 VARIANT_LABELS = ["concise", "step_by_step", "test_driven"]
+VARIANT_TEMPERATURES = [0.2, 0.7, 1.0]
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +60,11 @@ def _code_prompt(task_prompt: str, plan: str, variant: str, canonical_solution: 
         "- Enclose your code in ```python ... ``` blocks.\n"
     )
     if variant == "concise":
-        prompt = base + "- Keep implementation minimal and direct."
+        prompt = base + "- Keep implementation minimal, direct, and straightforward."
     elif variant == "step_by_step":
         prompt = base + "- Include clear inline comments explaining each step of the plan."
     else:  # test_driven
-        prompt = base + "- Defensively handle edge cases, empty inputs, and type bounds."
+        prompt = base + "- Defensively handle edge cases, empty inputs, single-element collections, and negative bounds."
 
     if is_dry_run() and canonical_solution:
         prompt += f"\n###REF_CODE:\n{canonical_solution}\n###END_REF###"
@@ -81,9 +82,9 @@ def _fix_prompt(task_prompt: str, code: str, test_feedback: str, variant: str, c
     if variant == "concise":
         prompt = base + "- Make minimal, targeted bug fixes."
     elif variant == "step_by_step":
-        prompt = base + "- Carefully analyze why tests failed before correcting the code."
+        prompt = base + "- Carefully analyze why tests failed before systematically correcting the code."
     else:  # test_driven
-        prompt = base + "- Rewrite or refactor the solution to ensure 100% test pass rate."
+        prompt = base + "- Rewrite or refactor the solution to ensure 100% test pass rate across all edge cases."
 
     if is_dry_run() and canonical_solution:
         prompt += f"\n###REF_CODE:\n{canonical_solution}\n###END_REF###"
@@ -108,8 +109,8 @@ def extract_code(text: str) -> str:
     return text.strip()
 
 
-def run_unit_tests(code: str, entry_point: str, tests: list[str], timeout: float = 5.0) -> tuple[float, str]:
-    """Execute unit tests in a subprocess with timeout and memoization.
+def run_unit_tests(code: str, entry_point: str, tests: list[str], timeout: float = 3.0) -> tuple[float, str]:
+    """Execute unit tests with memoization and timeout safety.
 
     Returns:
         (score, details_string) where score in [0.0, 1.0] is fraction of passed tests.
@@ -119,24 +120,31 @@ def run_unit_tests(code: str, entry_point: str, tests: list[str], timeout: float
     if cache_key in _TEST_RESULT_CACHE:
         return _TEST_RESULT_CACHE[cache_key]
 
-    # In dry-run mode, perform instant fast evaluation without spawning subprocesses
+    # Fast deterministic evaluation in dry-run mode
     if is_dry_run():
         if not clean_code or "def " not in clean_code:
             res = (0.0, "Dry-run: stub solution failed all tests.")
+            _TEST_RESULT_CACHE[cache_key] = res
+            return res
+
+        # Extract temperature if logged in metadata/code comment or hash
+        h = abs(hash(clean_code)) % 100
+        # If reference code is untouched -> high score
+        if "###REF_CODE" in clean_code or h < 35:
+            res = (1.0, f"Dry-run: PASSED {len(tests)}/{len(tests)}")
+        elif h < 65:
+            passed = max(1, int(len(tests) * 0.75))
+            res = (round(passed / len(tests), 4), f"Dry-run: PASSED {passed}/{len(tests)}")
+        elif h < 85:
+            passed = max(1, int(len(tests) * 0.50))
+            res = (round(passed / len(tests), 4), f"Dry-run: PASSED {passed}/{len(tests)}")
         else:
-            # Check how close it is to reference
-            h = abs(hash(clean_code)) % 100
-            if "###REF_CODE" in clean_code or h < 80:
-                res = (1.0, f"Dry-run: PASSED {len(tests)}/{len(tests)}")
-            elif h < 90:
-                passed = max(1, len(tests) - 1)
-                res = (passed / len(tests), f"Dry-run: PASSED {passed}/{len(tests)}")
-            else:
-                passed = max(1, len(tests) // 2)
-                res = (passed / len(tests), f"Dry-run: PASSED {passed}/{len(tests)}")
+            passed = max(1, int(len(tests) * 0.30))
+            res = (round(passed / len(tests), 4), f"Dry-run: PASSED {passed}/{len(tests)}")
         _TEST_RESULT_CACHE[cache_key] = res
         return res
 
+    # Live subprocess execution with timeout
     test_suite = repr(tests)
     runner_script = f"""
 import sys
@@ -145,23 +153,16 @@ import sys
 
 tests = {test_suite}
 passed = 0
-failures = []
-
-for idx, t in enumerate(tests):
+for t in tests:
     try:
         exec(t, globals())
         passed += 1
-    except AssertionError as e:
-        failures.append(f"Test {{idx + 1}} failed assertion: {{t}}")
-    except Exception as e:
-        failures.append(f"Test {{idx + 1}} error: {{type(e).__name__}}: {{e}}")
+    except Exception:
+        pass
 
 total = len(tests)
 print(f"PASSED: {{passed}}/{{total}}")
-if failures:
-    print("DETAILS: " + " | ".join(failures[:3]))
 """
-
     try:
         proc = subprocess.run(
             [sys.executable, "-c", runner_script],
@@ -173,15 +174,13 @@ if failures:
         if match:
             p = int(match.group(1))
             tot = int(match.group(2))
-            frac = p / max(1, tot)
-            res = (frac, proc.stdout.strip())
+            res = (round(p / max(1, tot), 4), proc.stdout.strip())
         else:
-            err = proc.stderr.strip()[:300] if proc.stderr else "Runtime execution error"
-            res = (0.0, f"Execution failed: {err}")
+            res = (0.0, "Subprocess execution failed.")
     except subprocess.TimeoutExpired:
-        res = (0.0, "Execution timed out (5s limit exceeded)")
-    except Exception as ex:
-        res = (0.0, f"Subprocess runner error: {ex}")
+        res = (0.0, "Subprocess execution timed out (3s limit).")
+    except Exception as e:
+        res = (0.0, f"Subprocess runner error: {e}")
 
     _TEST_RESULT_CACHE[cache_key] = res
     return res
@@ -206,10 +205,7 @@ def judge_plan_quality(plan: str, task_prompt: str, seed: int = 42) -> float:
 
     resp = cached_llm_call(JUDGE_MODEL, messages, temperature=0.0, seed=seed)
     match = re.search(r"\b(10|[0-9])\b", resp.content)
-    if match:
-        score_10 = int(match.group(1))
-    else:
-        score_10 = 5
+    score_10 = int(match.group(1)) if match else 5
     return score_10 / 10.0
 
 
@@ -246,11 +242,14 @@ class CodeTask:
             if cnt > 0:
                 costs.append(self._stage_costs[i] / cnt)
             else:
-                costs.append(100.0)  # default estimate before measurement
+                costs.append(100.0)
         return costs
 
     def expand_stage(self, parent_ids: list[str | None], stage_idx: int) -> list[Checkpoint]:
-        """Generate variant children for parents at this stage."""
+        """Generate variant children for parents at this stage.
+
+        Each variant has a distinct prompt style AND temperature (0.2, 0.7, 1.0).
+        """
         stage_name = STAGES[stage_idx]
         new_nodes: list[Checkpoint] = []
 
@@ -259,7 +258,8 @@ class CodeTask:
             parent_cumulative = parent.cumulative_cost_tokens if parent else 0
 
             for v_idx, v_label in enumerate(VARIANT_LABELS):
-                call_seed = self.seed + stage_idx * 100 + v_idx * 10
+                temp = VARIANT_TEMPERATURES[v_idx]
+                call_seed = self.seed + stage_idx * 1000 + v_idx * 100
 
                 if stage_name == "plan":
                     prompt = _plan_prompt(self.task_prompt, v_label, self.canonical_solution)
@@ -268,7 +268,6 @@ class CodeTask:
                     prompt = _code_prompt(self.task_prompt, plan_content, v_label, self.canonical_solution)
                 else:  # fix
                     code_content = parent.content if parent else ""
-                    # Test parent code to get error feedback for prompt
                     _, feedback = run_unit_tests(code_content, self.entry_point, self.tests)
                     prompt = _fix_prompt(self.task_prompt, code_content, feedback, v_label, self.canonical_solution)
 
@@ -276,7 +275,7 @@ class CodeTask:
                 resp = cached_llm_call(
                     GEN_MODEL,
                     messages,
-                    temperature=TEMPERATURE,
+                    temperature=temp,
                     seed=call_seed,
                 )
                 self.cost_accumulator.add(resp)
@@ -286,10 +285,11 @@ class CodeTask:
                     stage=stage_idx,
                     stage_name=stage_name,
                     variant=v_idx,
-                    variant_label=v_label,
+                    variant_label=f"{v_label}_t{temp}",
                     content=resp.content,
                     stage_cost_tokens=resp.total_tokens,
                     cumulative_cost_tokens=parent_cumulative + resp.total_tokens,
+                    metadata={"temperature": temp, "seed": call_seed},
                 )
                 self.tree.add(node)
                 new_nodes.append(node)
@@ -318,4 +318,3 @@ class CodeTask:
 
     def get_node(self, node_id: str) -> Checkpoint:
         return self.tree.get(node_id)
-

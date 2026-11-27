@@ -1,4 +1,10 @@
-"""Analyze experiment results and generate figures and summary tables.
+"""Analyze experiment results and generate publication-quality figures and summary tables.
+
+Produces:
+  - results/fig1_score_vs_budget.png: Best score vs token budget (10% to 100% of shared cost)
+  - results/fig2_regret.png: Regret vs oracle across policies
+  - results/table.md: Markdown summary table
+  - results/table.tex: LaTeX table for publication
 
 Usage:
     python experiments/analyze.py [--input results/results.csv] [--outdir results]
@@ -35,18 +41,17 @@ except ImportError:
 
 
 def fig1_score_vs_budget(df: pd.DataFrame, outdir: str) -> None:
-    """Figure 1: Best score vs token budget with 95% CI bands."""
-    fig, ax = plt.subplots(figsize=(9, 5.5), dpi=300)
+    """Figure 1: Best score vs token budget fraction (% of exhaustive_shared cost) with 95% CI bands."""
+    fig, ax = plt.subplots(figsize=(9.5, 6), dpi=300)
 
     policies = sorted(df["policy"].unique())
-    # Distinct styling for cost_aware_sh (highlighted)
     palette = {
         "cost_aware_sh": ("#D9381E", 2.8, "-o", 10),
-        "exhaustive_shared": ("#1E88E5", 2.0, "--s", 9),
+        "exhaustive_shared": ("#1E88E5", 2.2, "--s", 9),
         "exhaustive_no_sharing": ("#757575", 1.8, ":^", 8),
-        "beam": ("#00897B", 1.8, "-.d", 7),
-        "greedy": ("#FB8C00", 1.8, "-.v", 6),
-        "sh_cost_blind": ("#8E24AA", 1.8, "-x", 5),
+        "beam": ("#00897B", 2.0, "-.d", 7),
+        "greedy": ("#FB8C00", 2.0, "-.v", 6),
+        "sh_cost_blind": ("#8E24AA", 2.0, "-x", 5),
         "random_prune": ("#B0BEC5", 1.5, ":+", 4),
     }
 
@@ -55,7 +60,6 @@ def fig1_score_vs_budget(df: pd.DataFrame, outdir: str) -> None:
         stats_df = pdf.groupby("budget_frac")["best_score"].agg(["mean", "sem", "count"]).reset_index()
 
         color, lw, marker, zorder = palette.get(policy, ("#333333", 1.5, "-o", 5))
-        # 95% CI
         ci95 = stats_df["sem"].fillna(0) * 1.96
 
         ax.plot(
@@ -77,13 +81,13 @@ def fig1_score_vs_budget(df: pd.DataFrame, outdir: str) -> None:
             zorder=zorder - 1,
         )
 
-    ax.set_title("Figure 1: Best Branch Score vs. Token Budget Fraction", fontsize=13, fontweight="bold", pad=12)
-    ax.set_xlabel("Token Budget (% of Exhaustive Unshared Cost)", fontsize=11)
-    ax.set_ylabel("Best Score (Fraction of Unit Tests Passed)", fontsize=11)
+    ax.set_title("Figure 1: Best Quality vs. Token Budget (% of Exhaustive Shared Baseline)", fontsize=13, fontweight="bold", pad=12)
+    ax.set_xlabel("Token Budget (% of Exhaustive Shared Tree Cost)", fontsize=11)
+    ax.set_ylabel("Best Branch Quality (Fraction of Tests Passed)", fontsize=11)
     ax.set_ylim(-0.02, 1.05)
-    ax.set_xticks([25, 50, 75, 100])
+    ax.set_xticks([10, 20, 30, 50, 100])
     ax.grid(True, linestyle="--", alpha=0.5)
-    ax.legend(title="Policy", fontsize=9, title_fontsize=10, loc="lower right", framealpha=0.9)
+    ax.legend(title="Policy", fontsize=9, title_fontsize=10, loc="lower right", framealpha=0.92)
 
     outpath = os.path.join(outdir, "fig1_score_vs_budget.png")
     fig.tight_layout()
@@ -93,17 +97,17 @@ def fig1_score_vs_budget(df: pd.DataFrame, outdir: str) -> None:
 
 
 def fig2_regret(df: pd.DataFrame, outdir: str) -> None:
-    """Figure 2: Regret vs Oracle per policy."""
-    fig, ax = plt.subplots(figsize=(9, 5.5), dpi=300)
+    """Figure 2: Regret vs Oracle across policies."""
+    fig, ax = plt.subplots(figsize=(9.5, 6), dpi=300)
 
     policies = sorted(df["policy"].unique())
     palette = {
         "cost_aware_sh": ("#D9381E", 2.8, "-o", 10),
-        "exhaustive_shared": ("#1E88E5", 2.0, "--s", 9),
+        "exhaustive_shared": ("#1E88E5", 2.2, "--s", 9),
         "exhaustive_no_sharing": ("#757575", 1.8, ":^", 8),
-        "beam": ("#00897B", 1.8, "-.d", 7),
-        "greedy": ("#FB8C00", 1.8, "-.v", 6),
-        "sh_cost_blind": ("#8E24AA", 1.8, "-x", 5),
+        "beam": ("#00897B", 2.0, "-.d", 7),
+        "greedy": ("#FB8C00", 2.0, "-.v", 6),
+        "sh_cost_blind": ("#8E24AA", 2.0, "-x", 5),
         "random_prune": ("#B0BEC5", 1.5, ":+", 4),
     }
 
@@ -134,11 +138,11 @@ def fig2_regret(df: pd.DataFrame, outdir: str) -> None:
         )
 
     ax.set_title("Figure 2: Regret vs. Oracle Across Token Budgets", fontsize=13, fontweight="bold", pad=12)
-    ax.set_xlabel("Token Budget (% of Exhaustive Unshared Cost)", fontsize=11)
+    ax.set_xlabel("Token Budget (% of Exhaustive Shared Tree Cost)", fontsize=11)
     ax.set_ylabel("Regret (Oracle Score - Best Score)", fontsize=11)
-    ax.set_xticks([25, 50, 75, 100])
+    ax.set_xticks([10, 20, 30, 50, 100])
     ax.grid(True, linestyle="--", alpha=0.5)
-    ax.legend(title="Policy", fontsize=9, title_fontsize=10, loc="upper right", framealpha=0.9)
+    ax.legend(title="Policy", fontsize=9, title_fontsize=10, loc="upper right", framealpha=0.92)
 
     outpath = os.path.join(outdir, "fig2_regret.png")
     fig.tight_layout()
@@ -178,7 +182,7 @@ def export_tables(df: pd.DataFrame, outdir: str) -> pd.DataFrame:
     formatted = formatted.rename(columns=rename_map)
 
     # Export Markdown
-    md_content = "# Policy Evaluation Summary\n\n" + formatted.to_markdown(index=False) + "\n"
+    md_content = "# Policy Evaluation Summary (40+ Harder Problems)\n\n" + formatted.to_markdown(index=False) + "\n"
     md_path = os.path.join(outdir, "table.md")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md_content)
@@ -277,4 +281,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

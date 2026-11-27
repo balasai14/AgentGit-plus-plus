@@ -262,9 +262,9 @@
           </div>
 
           <div class="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 rounded-lg border border-zinc-800">
-            <label class="text-xs text-zinc-400 font-medium">Budget:</label>
-            <input type="range" id="tree-budget-slider" min="25" max="100" step="25" value="50" oninput="updateTreeVisualization()" class="w-20 accent-rose-500 cursor-pointer">
-            <span id="tree-budget-label" class="text-xs font-mono text-rose-400 w-8">50%</span>
+            <label class="text-xs text-zinc-400 font-medium">Budget (% of Shared):</label>
+            <input type="range" id="tree-budget-slider" min="10" max="100" step="10" value="30" oninput="updateTreeVisualization()" class="w-24 accent-rose-500 cursor-pointer">
+            <span id="tree-budget-label" class="text-xs font-mono text-rose-400 w-10">30%</span>
           </div>
 
           <button onclick="resetTreeZoom()" class="p-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white" title="Reset View">
@@ -632,7 +632,7 @@
         random_prune: '#94a3b8'
       };
 
-      const labels = [25, 50, 75, 100];
+      const labels = [10, 20, 30, 50, 100];
 
       // Score Chart
       const scoreCtx = document.getElementById('scoreChart');
@@ -729,8 +729,12 @@
         survived: true
       });
 
-      // Stage 1: Plans (3 variants)
-      const planVariants = ["concise", "step_by_step", "test_driven"];
+      // Stage 1: Plans (3 variants with t=0.2, 0.7, 1.0)
+      const planVariants = [
+        { label: "concise (t=0.2)", temp: 0.2 },
+        { label: "step_by_step (t=0.7)", temp: 0.7 },
+        { label: "test_driven (t=1.0)", temp: 1.0 }
+      ];
       const planNodes = [];
       const planY = [120, 240, 360];
 
@@ -738,19 +742,20 @@
       let planSurvivors = 3;
       if (policy === 'greedy') planSurvivors = 1;
       else if (policy === 'beam') planSurvivors = 2;
-      else if (policy === 'cost_aware_sh' && budget <= 25) planSurvivors = 1;
-      else if (policy === 'cost_aware_sh' && budget <= 50) planSurvivors = 2;
+      else if (policy === 'cost_aware_sh' && budget <= 20) planSurvivors = 1;
+      else if (policy === 'cost_aware_sh' && budget <= 40) planSurvivors = 2;
 
-      planVariants.forEach((v, idx) => {
+      planVariants.forEach((vObj, idx) => {
         const survived = idx < planSurvivors;
         const node = {
           id: `plan_${idx}`,
           stage: "Plan",
-          variant: v,
-          title: `Plan: ${v}`,
-          prompt: `Write a ${v} plan to implement add_two.`,
-          code: `# Plan (${v}):\n1. Validate arguments\n2. Return a + b`,
-          tests: "LLM Judge Score: 8/10",
+          variant: vObj.label,
+          temperature: vObj.temp,
+          title: `P${idx}: ${vObj.label.split(' ')[0]}`,
+          prompt: `Write a ${vObj.label} plan to implement function. (temp=${vObj.temp})`,
+          code: `# Architecture Plan (${vObj.label})\n1. Analyze input bounds\n2. Algorithmic core\n3. Verification assert invariants`,
+          tests: "LLM Plan Judge: 8/10",
           cost: 95,
           score: 0.8,
           survived: survived

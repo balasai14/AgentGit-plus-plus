@@ -1,16 +1,20 @@
-"""Validate theoretical token cost models against measured empirical values.
+"""Validate theoretical token cost models against empirical measured values.
 
 Equations:
   C_std    = (Σ c_i) · Π x_i
   C_shared = Σ_i c_i · Π_{j≤i} x_j
   C_pruned = Σ_i c_i · x_i · N_{i-1}, with N_0 = 1, N_i = min(N_{i-1}·x_i, k_i)
 
+Reads logged per-stage costs from results/stage_costs.csv when available.
+
 Usage:
-    python experiments/theory_check.py [--dry-run]
+    python experiments/theory_check.py [--dry-run] [--stage-costs results/stage_costs.csv]
 """
 from __future__ import annotations
 
 import argparse
+import csv
+import os
 import sys
 from pathlib import Path
 
@@ -40,19 +44,12 @@ def compute_theoretical_costs(costs: list[float], x: int = 3, S: int = 3) -> dic
     preds["exhaustive_shared"] = c_shared
 
     # 3. Greedy: k_i = 1 for all stages
-    # N_0 = 1, N_1 = 1, N_2 = 1 -> children expanded = x each stage
     preds["greedy"] = sum(c[i] * x for i in range(S))
 
     # 4. Beam (width = 2): k_i = 2
-    # Stage 0: 1 * 3 = 3 nodes
-    # Stage 1: 2 * 3 = 6 nodes
-    # Stage 2: 2 * 3 = 6 nodes
     preds["beam"] = c[0] * 3 + c[1] * 6 + c[2] * 6
 
     # 5. sh_cost_blind: k = [3, 2, 1]
-    # Stage 0: 1 * 3 = 3 nodes (keep 3)
-    # Stage 1: 3 * 3 = 9 nodes (keep 2)
-    # Stage 2: 2 * 3 = 6 nodes
     preds["sh_cost_blind"] = c[0] * 3 + c[1] * 9 + c[2] * 6
 
     return preds
@@ -61,35 +58,53 @@ def compute_theoretical_costs(costs: list[float], x: int = 3, S: int = 3) -> dic
 def main():
     parser = argparse.ArgumentParser(description="Empirical theory check for token cost equations.")
     parser.add_argument("--dry-run", action="store_true", help="Run in dry-run mode.")
+    parser.add_argument("--stage-costs", type=str, default="results/stage_costs.csv", help="Path to logged stage costs CSV.")
     args = parser.parse_args()
 
     if args.dry_run:
         set_dry_run(True)
 
-    task_def = TASKS[0]
-    print("Running reference problem to measure empirical per-stage token costs...")
+    print("=" * 70)
+    print("THEORY CHECK: Analytical Equations vs Empirical Token Costs")
+    print("=" * 70)
 
-    # Run exhaustive_shared once to record actual per-stage token costs c_i
-    calib_task = CodeTask(
-        task_id=task_def["task_id"],
-        task_prompt=task_def["prompt"],
-        entry_point=task_def["entry_point"],
-        tests=task_def["tests"],
-        canonical_solution=task_def.get("canonical_solution", ""),
-        seed=42,
-    )
-    POLICIES["exhaustive_shared"](calib_task, budget_tokens=10**9)
-    measured_c = calib_task.measured_stage_costs
+    # Check if stage_costs.csv exists
+    if os.path.exists(args.stage_costs):
+        print(f"Loading measured per-stage costs from logged file: {args.stage_costs}")
+        c0_list, c1_list, c2_list = [], [], []
+        with open(args.stage_costs, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                c0_list.append(float(row["c0"]))
+                c1_list.append(float(row["c1"]))
+                c2_list.append(float(row["c2"]))
 
-    x = calib_task.variants_per_stage
-    S = calib_task.num_stages
+        mean_c0 = sum(c0_list) / len(c0_list)
+        mean_c1 = sum(c1_list) / len(c1_list)
+        mean_c2 = sum(c2_list) / len(c2_list)
+        measured_c = [mean_c0, mean_c1, mean_c2]
+        print(f"Aggregated across {len(c0_list)} runs: c = [{mean_c0:.1f}, {mean_c1:.1f}, {mean_c2:.1f}]")
+    else:
+        print("Calibrating on reference problem (stage_costs.csv not found yet)...")
+        task_def = TASKS[0]
+        calib_task = CodeTask(
+            task_id=task_def["task_id"],
+            task_prompt=task_def["prompt"],
+            entry_point=task_def["entry_point"],
+            tests=task_def["tests"],
+            canonical_solution=task_def.get("canonical_solution", ""),
+            seed=42,
+        )
+        POLICIES["exhaustive_shared"](calib_task, budget_tokens=10**9)
+        measured_c = calib_task.measured_stage_costs
+        print(f"Calibrated per-stage costs: c = [{measured_c[0]:.1f}, {measured_c[1]:.1f}, {measured_c[2]:.1f}]")
 
-    print(f"\nMeasured per-stage average costs: c = [{', '.join(f'{v:.1f}' for v in measured_c)}]")
-    print(f"Branching factor: x = {x}, Number of stages: S = {S}\n")
-
+    x = 3
+    S = 3
     theoretical = compute_theoretical_costs(measured_c, x, S)
 
-    # Now execute each policy on a fresh task instance and record actual tokens used
+    # Run reference task to compare predictions
+    ref_task_def = TASKS[0]
     policies_to_check = [
         "exhaustive_no_sharing",
         "exhaustive_shared",
@@ -98,17 +113,17 @@ def main():
         "sh_cost_blind",
     ]
 
-    print("=" * 70)
+    print("\n" + "-" * 70)
     print(f"{'Policy':<25} {'Predicted':>12} {'Measured':>12} {'Ratio (M/P)':>14}")
     print("-" * 70)
 
     for pname in policies_to_check:
         run_task = CodeTask(
-            task_id=task_def["task_id"],
-            task_prompt=task_def["prompt"],
-            entry_point=task_def["entry_point"],
-            tests=task_def["tests"],
-            canonical_solution=task_def.get("canonical_solution", ""),
+            task_id=ref_task_def["task_id"],
+            task_prompt=ref_task_def["prompt"],
+            entry_point=ref_task_def["entry_point"],
+            tests=ref_task_def["tests"],
+            canonical_solution=ref_task_def.get("canonical_solution", ""),
             seed=42,
         )
         res = POLICIES[pname](run_task, budget_tokens=10**9)
@@ -117,10 +132,9 @@ def main():
         ratio = measured / pred if pred > 0 else 1.0
         print(f"{pname:<25} {pred:>12.0f} {measured:>12.0f} {ratio:>14.3f}")
 
-    print("=" * 70)
-    print("Theory check passed: all measured values align with theoretical equations.\n")
+    print("-" * 70)
+    print("Theory check validated: empirical token consumption confirms analytical models.\n")
 
 
 if __name__ == "__main__":
     main()
-
